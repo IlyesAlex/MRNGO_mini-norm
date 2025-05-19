@@ -1,0 +1,7 @@
+"0","# ── 6) Stitch everything back together ───────────────────────────────────────────
+df_final <- df_pf %>%
+  left_join(concept_summary, by = ""concept"") %>%
+  left_join(density_df,       by = ""concept"")
+"
+"2","Error: object 'density_df' not found
+"

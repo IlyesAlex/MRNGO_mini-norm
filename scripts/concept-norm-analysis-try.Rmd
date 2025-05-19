@@ -1,0 +1,223 @@
+---
+title: "concept-norms"
+output: html_document
+date: "2025-04-17"
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This R Markdown document is made interactive using Shiny. Unlike the more traditional workflow of creating static reports, you can now create documents that allow your readers to change the assumptions underlying your analysis and see the results immediately. 
+
+To learn more, see [Interactive Documents](http://rmarkdown.rstudio.com/authoring_shiny.html).
+
+## Inputs and Outputs
+
+You can embed Shiny inputs and outputs in your document. Outputs are automatically updated whenever inputs change.  This demonstrates how a standard R plot can be made interactive by wrapping it in the Shiny `renderPlot` function. The `selectInput` and `sliderInput` functions create the input widgets used to drive the plot.
+
+```{r eruptions, echo=FALSE}
+inputPanel(
+  selectInput("n_breaks", label = "Number of bins:",
+              choices = c(10, 20, 35, 50), selected = 20),
+  
+  sliderInput("bw_adjust", label = "Bandwidth adjustment:",
+              min = 0.2, max = 2, value = 1, step = 0.2)
+)
+
+renderPlot({
+  hist(faithful$eruptions, probability = TRUE, breaks = as.numeric(input$n_breaks),
+       xlab = "Duration (minutes)", main = "Geyser eruption duration")
+  
+  dens <- density(faithful$eruptions, adjust = input$bw_adjust)
+  lines(dens, col = "blue")
+})
+```
+
+## Embedded Application
+
+It's also possible to embed an entire Shiny application within an R Markdown document using the `shinyAppDir` function. This example embeds a Shiny application located in another directory:
+
+```{r tabsets, echo=FALSE}
+shinyAppDir(
+  system.file("examples/06_tabsets", package = "shiny"),
+  options = list(
+    width = "100%", height = 550
+  )
+)
+```
+
+Note the use of the `height` parameter to determine how much vertical space the embedded application should occupy.
+
+You can also use the `shinyApp` function to define an application inline rather then in an external directory.
+
+In all of R code chunks above the `echo = FALSE` attribute is used. This is to prevent the R code within the chunk from rendering in the document alongside the Shiny components.
+
+
+
+```{r Library}
+library(WordListsAnalytics)
+library(udpipe)
+library(readr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(writexl)
+library(dplyr)
+library(hunspell)
+```
+```{r Model}
+model <- udpipe_download_model(language = "hungarian")
+ud_model <- udpipe_load_model(file = model$file_model)
+```
+
+
+```{r Raw transcript}
+path_transcript <- "../rawdata/"
+
+txt_files <- list.files(path = path_transcript,
+                             pattern = "\\.txt$")
+
+## from transcript
+df <- tibble(
+  file = parse_number(txt_files),
+  text = map_chr(
+    file.path(path_transcript, txt_files),     
+    ~ read_lines(.x) %>%
+    str_subset("^Gy:") %>%
+    str_remove("^Gy:") %>% 
+    str_c(collapse = "\n")))
+```
+
+```{r Preprocessed}
+path_preprocessed <- "../preprocessed/"
+
+df <- readxl::read_excel(file.path(path_preprocessed, "MRNGO_preprocessed.xlsx")) %>% 
+  mutate(doc_id  = row_number())
+
+text <- df$response
+```
+
+
+```{r Autocorrect}
+
+hunspell("Ez finom vot.", dict = "hu-HU") #check if hungarian dict is installed
+list_dictionaries() #check if there's hungarian
+
+
+cleantext <- function(text_vec, dict = "hu-HU"){
+  vapply(text_vec, function(sentence) {
+    # find all the “bad” words
+    bads <- hunspell(sentence, dict = dict)[[1]]
+    if (length(bads) == 0) return(sentence)  
+
+    # for each bad word, get suggestions and replace if possible
+    for (bad in bads) {
+      suggs <- hunspell_suggest(bad, dict = dict)[[1]]
+      if (length(suggs) > 0) {
+        # take the top suggestion
+        best <- suggs[1]
+        sentence <- gsub(bad, best, sentence, fixed = TRUE)
+      }
+    }
+    sentence
+  }, FUN.VALUE = character(1), USE.NAMES = FALSE)
+}
+
+correct_text <- cleantext(text)
+df$response_correct <- correct_text
+```
+
+
+```{r Lemmatization}
+annotation <- udpipe_annotate(ud_model, x = df$response_correct, doc_id = df$doc_id)
+df_annotalt <- as.data.frame(annotation)
+df_annotalt <- df_annotalt[, c("doc_id", "token", "lemma", "upos")] %>% 
+    mutate(doc_id = as.integer(doc_id))
+
+df_annotalt <- df %>%
+  left_join(df_annotalt, by = "doc_id")
+
+write_xlsx(df_annotalt, "../lemmatized/MRNGO_annotated_lemmas.xlsx")
+```
+
+
+```{r Phrases}
+
+df_annotalt$tag1 <- as_phrasemachine(df_annotalt$upos, type = "upos")
+
+extract_phrases <- function(df, pattern, type_label) {
+  df %>% 
+    group_split(doc_id) %>% 
+    map_dfr(function(d) {
+      kp <- keywords_phrases(
+        x        = d$tag1,
+        term     = d$token,
+        pattern  = pattern,
+        is_regex = TRUE,
+        detailed = TRUE
+      )
+      if (nrow(kp) == 0) return(NULL)
+      kp %>% 
+        mutate(
+          doc_id = unique(d$doc_id),
+          type   = type_label
+        )
+    })
+}
+
+
+np_det <- extract_phrases(
+  df        = df_annotalt,
+  pattern   = "(A|N)*N(P+D*(A|N)*N)*",
+  type_label = "NP"
+)
+
+vp_det <- extract_phrases(
+  df        = df_annotalt,
+  pattern   = "((A|N)*N(P+D*(A|N)*N)*P*(M|V)*V(M|V)*)",
+  type_label = "VP"
+)
+
+ap_det <- extract_phrases(
+  df        = df_annotalt,
+  pattern   = "A+",
+  type_label = "AP"
+)
+
+phrases_det <- bind_rows(np_det, vp_det, ap_det)
+
+df_phrases <- df %>%
+  left_join(phrases_det, by = "doc_id") %>% 
+  subset(ngram >= 2)
+write_xlsx(df_phrases, "../lemmatized/MRNGO_phrases.xlsx")
+
+```
+
+## WordLIstsAnalytics
+
+```{r}
+df_proba <- df_annotalt[, c("ID","concept", "lemma")] %>% 
+  mutate(ID = as.integer(factor(ID)))
+
+data <- data.frame(df_proba)
+df_norms <- generate_norms(data)
+
+data %>% 
+  filter(concept == "cat_01_a05") %>% 
+  distinct(lemma)
+
+df_annotalt %>% 
+  group_by(Concept, ID) %>% 
+  distinct(Property) %>% 
+  count()
+
+WordListsAnalytics()
+
+```
+
+
+
+
+

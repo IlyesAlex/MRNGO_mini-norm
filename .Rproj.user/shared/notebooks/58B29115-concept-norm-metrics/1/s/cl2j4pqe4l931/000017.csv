@@ -1,0 +1,11 @@
+"0","ggsave(
+  filename = ""../figures/feature_richness_count.png"",
+  plot     = richness_plot,
+  width    = 9,
+  height   = 6,
+  units    = ""in"",
+  dpi      = 300
+)
+"
+"2","Error: object 'richness_plot' not found
+"

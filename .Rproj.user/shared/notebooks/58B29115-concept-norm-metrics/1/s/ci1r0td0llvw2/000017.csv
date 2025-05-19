@@ -1,0 +1,43 @@
+"0","mrngo_data = read_excel(""../processed/MRNGO_manual_vector_lemmas_summary.xlsx"","
+"0","                 sheet = ""aggregated_data"")"
+"0",""
+"0","mrngo_data_cleaned = mrngo_wordlist %>% "
+"0","  mutate(sex=as.factor(sex)) %>% "
+"0","  mutate(grade=as.factor(grade)) %>% "
+"0","  mutate(category = recode(category, !!!category_map),"
+"0","         concept  = recode(concept,  !!!concept_map)"
+"0","  ) %>% "
+"0","  mutate(category=as.factor(category)) %>% "
+"0","  mutate(concept=as.factor(concept)) %>% "
+"0","  mutate("
+"0","    age = if_else(age %in% c(0, 24), "
+"0","                  6L,    # ha egész számot akarsz"
+"0","                  age)"
+"0","  ) %>% "
+"0","  rename(feature = vector_lemma_C) %>% "
+"0","  mutate(feature = as.factor(feature)) %>% "
+"0","  distinct(ID, concept, feature) %>% "
+"0",""
+"0","  "
+"0","  "
+"2","Error: Incomplete expression: 
+mrngo_data_cleaned = mrngo_wordlist %>% 
+  mutate(sex=as.factor(sex)) %>% 
+  mutate(grade=as.factor(grade)) %>% 
+  mutate(category = recode(category, !!!category_map),
+         concept  = recode(concept,  !!!concept_map)
+  ) %>% 
+  mutate(category=as.factor(category)) %>% 
+  mutate(concept=as.factor(concept)) %>% 
+  mutate(
+    age = if_else(age %in% c(0, 24), 
+                  6L,    # ha egész számot akarsz
+                  age)
+  ) %>% 
+  rename(feature = vector_lemma_C) %>% 
+  mutate(feature = as.factor(feature)) %>% 
+  distinct(ID, concept, feature) %>% 
+
+  
+  
+"

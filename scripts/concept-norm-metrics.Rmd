@@ -1,0 +1,702 @@
+---
+title: "concept-norm-metrics"
+output: html_document
+---
+
+# This is the analysis page of the MRNGO mini-norm (for DUCOG 2025)
+
+Let's read in the packages
+
+```{r}
+# PACAKAGES
+library(dplyr)
+library(tidyverse)
+library(WordListsAnalytics)
+library(readxl)
+library(ggplot2)
+
+theme_set(theme_light())
+
+custom_theme = theme(
+      plot.title = element_text(color="black", size=30, face="bold",  hjust = 0.5, vjust = 3), #30 for covariate plots
+      axis.text.x = element_text(vjust = 0.5, hjust=0.5, size = 20, face="bold"), #was 16 for other plots besides rec resp rate
+      axis.text.y = element_text(vjust = 0.5, hjust=0.5, size = 20, face="bold"),
+      axis.title.x = element_text(vjust = -2, hjust=0.5, size = 26, face="bold"),
+      axis.title.y = element_text(vjust = 3, hjust=0.5, size = 26, face="bold"),
+      legend.text = element_text(vjust = 0.5, hjust=0.5, size = 22, face="bold"),
+      legend.title = element_text(vjust = 0.5, hjust=0.5, size = 24, face="bold"),
+      strip.text = element_text(vjust = 0.5, hjust=0.5, size = 22, face="bold"),
+      panel.border = element_blank(),
+      panel.grid.major = element_blank(), 
+      panel.grid.minor = element_blank(),
+      panel.background = element_blank(),
+      plot.margin = margin(30, 30, 30, 30)
+      )
+
+```
+
+## READ-IN DATA
+
+RENAMING HUNGARIAN TO ENGLISH
+
+```{r}
+category_map <- list(
+  cat_01 = "animals",
+  cat_02 = "bodyparts",
+  cat_03 = "clothes",
+  cat_04 = "fooddrink",
+  cat_05 = "locations",
+  cat_06 = "people",
+  cat_07 = "plants",
+  cat_08 = "tools",
+  cat_09 = "toys",
+  cat_10 = "vehicles"
+)
+
+concept_map <- list(
+  alma        = "apple",
+  asztal      = "table",
+  autó        = "car",
+  bab         = "bean",
+  ceruza      = "pencil",
+  cipő        = "shoe",
+  citrom      = "lemon",
+  eper        = "strawberry",
+  erdő        = "forest",
+  gomba       = "mushroom",
+  gyerek      = "child",
+  helikopter  = "helicopter",
+  hercegnő    = "princess",
+  játszótér   = "playground",
+  kacsa       = "duck",
+  kard        = "sword",
+  krumpli     = "potato",
+  kutya       = "dog",
+  kéz         = "hand",
+  könyv       = "book",
+  láb         = "leg",
+  ló          = "horse",
+  nadrág      = "trousers",
+  nappali     = "livingroom",
+  pulóver     = "sweater",
+  seprű       = "broom",
+  szem        = "eye",
+  szőnyeg     = "carpet",
+  tűzoltó     = "firefighter",
+  vonat       = "train"
+)
+
+translations = c(
+  "HOL_BOLT"   = "IN_STORE",      # old = new
+  "LEHET_ESZIK" = "BE_EAT",
+  "ILYEN_NAGY"       = "IS_BIG",
+  "RÉSZE_LÁB"       = "HAS_LEG",
+  "ILYEN_BARNA"       = "IS_BROWN",
+  "HOL_HÁZ"       = "IN_HOUSE",
+  "MIBŐL_FÉM"       = "MATERIAL_METAL",
+  "ILYEN_PIROS"       = "IS_RED",
+  "FAJTA_GYÜMÖLCS"       = "TYPE_FRUIT",
+  "FAJTA_ÁLLAT"   = "TYPE_ANIMAL"
+  # … and so on for all your feature names …
+)
+
+```
+
+READING IN DATA AND CLEANING
+
+```{r}
+mrngo_data = read_excel("../processed/MRNGO_manual_vector_lemmas_summary.xlsx",
+                 sheet = "aggregated_data")
+
+mrngo_data_cleaned = mrngo_wordlist %>% 
+  mutate(sex=as.factor(sex)) %>% 
+  mutate(grade=as.factor(grade)) %>% 
+  mutate(category = recode(category, !!!category_map),
+         concept  = recode(concept,  !!!concept_map)
+  ) %>% 
+  mutate(category=as.factor(category)) %>% 
+  mutate(concept=as.factor(concept)) %>% 
+  mutate(
+    age = if_else(age %in% c(0, 24), 
+                  6L,    # ha egész számot akarsz
+                  age)
+  ) %>% 
+  rename(feature = vector_lemma_C) %>% 
+  mutate(feature = as.factor(feature)) %>% 
+  distinct(ID, concept, feature, .keep_all = TRUE)
+
+  
+  
+```
+
+## CALCULATE MCRAE THINGS
+
+```{r}
+
+library(dplyr)
+library(stringr)
+
+# ── 0) First tally up your “production frequencies”  ────────────────────────────
+df_counts <- mrngo_data_cleaned %>%
+  count(concept, feature, name = "Prod_Freq")
+
+
+# ── 1) Feature‐level summaries ──────────────────────────────────────────────────
+feature_stats <- df_counts %>%
+  group_by(feature) %>%
+  summarise(
+    Sum_PF_No_Tax = sum(Prod_Freq),       # total uses of that feature
+    CPF            = n_distinct(concept)  # number of concepts in which it occurs
+  ) %>%
+  mutate(
+    Disting  = if_else(CPF <= 2, "D", "ND"),
+    Distinct = 1 / CPF                    # inverse of number of concepts
+  )
+
+
+# ── 2) Bring those back to the concept×feature table & compute CV ─────────────
+df_pf <- df_counts %>%
+  left_join(feature_stats, by = "feature") %>%
+  mutate(
+    CV_No_Tax = Prod_Freq / Sum_PF_No_Tax
+  )
+
+
+# ── 3) Within‐concept rankings & some string‐lengths ────────────────────────────
+df_pf <- df_pf %>%
+  group_by(concept) %>%
+  arrange(desc(Prod_Freq)) %>%
+  mutate(
+    Rank_PF = row_number()
+  ) %>%
+  ungroup() %>%
+  mutate(
+    Feat_Length_Including_Spaces = str_length(feature),
+    Length_Letters             = str_length(str_remove_all(concept, "[^A-Za-z]")),
+    Length_Syllables           = str_count(concept, "[AEIOUYaeiouy]+"),
+    Length_Phonemes            = NA_integer_  # ← you’ll need a phoneme counter/dictionary
+  )
+
+
+# ── 4) Concept‐level aggregates ──────────────────────────────────────────────────
+concept_summary <- df_pf %>%
+  group_by(concept) %>%
+  summarise(
+    Num_Feats_Tax         = n(),
+    Num_Disting_Feats_Tax = sum(Disting == "D"),
+    Disting_Feats._Tax    = Num_Disting_Feats_Tax / Num_Feats_Tax,
+    Mean_Distinct_Tax     = mean(Distinct)
+  )
+
+# ── 6) Stitch everything back together ───────────────────────────────────────────
+mrngo_data_clened_metrics <- df_pf %>%
+  left_join(concept_summary, by = "concept")
+
+
+# df_final now has one row per (concept, feature) with these new columns:
+#   Rank_PF,  Sum_PF_No_Tax, CPF, Disting, Distinct,
+#   CV_No_Tax, Feat_Length_Including_Spaces,
+#   Length_Letters, Length_Phonemes, Length_Syllables,
+#   Num_Feats_Tax, Num_Disting_Feats_Tax, Disting_Feats._Tax,
+#   Mean_Distinct_Tax, Num_Corred_Pairs_No_Tax,
+#   %_Corred_Pairs_Tax, Density_Tax
+
+
+```
+
+## SEMANTIC RICHNESS
+
+```{r}
+library(stringi)
+
+# 1) read in the richness file
+richness <- read_csv("../processed/MRNGO_mini-norm_richness.csv", col_types = cols())
+
+# 3) build a little lookup table that also has a 'de-accented' key
+map_df <- tibble(
+  concept_hu   = names(concept_map),
+  concept_de   = stringi::stri_trans_general(concept_hu, "Latin-ASCII"),
+  concept_en   = unname(concept_map)
+)
+
+# 4) attach English names into richness
+richness2 <- richness %>%
+  # assume your CSV has a column called "concept" with NO accents
+  mutate(concept_de = tolower(Concept)) %>%
+  left_join(map_df, by = "concept_de") %>% 
+  mutate(concept_en = as.factor(as.character(concept_en)))
+
+# 5) now merge with your metrics (which already use English names in `concept`)
+mrngo_data_clened_metrics_richness <- mrngo_data_clened_metrics %>%
+  left_join(
+    richness2 %>% select(concept_en, everything()), 
+    by = c("concept" = "concept_en")
+  )
+
+# check
+glimpse(mrngo_data_clened_metrics_richness)
+
+
+
+```
+
+## CONCEPT DATA
+
+```{r}
+
+
+# 1) Read your lookup sheet (first sheet by default; change sheet= if needed)
+concept_info <- read_excel("../processed/MRNGO_concepts.xlsx", sheet = 1) %>%
+  # keep only the three columns you need
+  select(item_en, word_frequency, aoa_any) %>%
+  # make sure item_en is a character vector
+  mutate(item_en = factor(item_en))
+  
+# 3) Left-join
+mrngo_data_clened_metrics_richness <- mrngo_data_clened_metrics_richness %>%
+  left_join(concept_info,
+            by = c("concept" = "item_en"))
+
+# 4) Quick check
+glimpse(mrngo_data_clened_metrics_richness)
+
+
+```
+
+
+## Demography
+
+```{r}
+
+mrngo_data_demography = mrngo_data_cleaned %>% 
+  select(ID, sex, age) %>%  distinct()
+
+# 1) Total counts by sex
+mrngo_data_demography %>% 
+  count(sex) %>% 
+  rename(Count = n)
+
+# 2) Summary of age (mean, median, SD, min, max)
+mrngo_data_demography %>% 
+  summarise(
+    N         = n(),
+    Mean_Age  = mean(age, na.rm = TRUE),
+    Median_Age= median(age, na.rm = TRUE),
+    SD_Age    = sd(age, na.rm = TRUE),
+    Min_Age   = min(age, na.rm = TRUE),
+    Max_Age   = max(age, na.rm = TRUE)
+  )
+
+# 3) Same summary broken down by sex
+mrngo_data_demography %>% 
+  group_by(sex) %>% 
+  summarise(
+    N         = n(),
+    Mean_Age  = mean(age, na.rm = TRUE),
+    Median_Age= median(age, na.rm = TRUE),
+    SD_Age    = sd(age, na.rm = TRUE),
+    Min_Age   = min(age, na.rm = TRUE),
+    Max_Age   = max(age, na.rm = TRUE)
+  )
+
+# 4) Age distribution histogram by sex, with English labels and a caption
+mrngo_data_demography %>% 
+  ggplot(aes(x = age, fill = sex)) +
+  geom_histogram(binwidth = 1, position = "dodge", color = "black") +
+  labs(
+    title   = "Age Distribution by Sex",
+    x       = "Age (years)",
+    y       = "Number of Participants",
+    caption = "Figure: Histogram of participant ages, separated by sex"
+  ) +
+  theme_minimal()
+
+# 5) Create age groups (6–8, 9–11, 12+) and summarize counts by group and sex
+mrngo_data_demography2 <- mrngo_data_demography %>% 
+  mutate(
+    age_group = case_when(
+      age <= 6            ~ "6",
+      age <= 7           ~ "7",
+      age <= 8                ~ "8",
+      age <= 9                ~ "9"
+    )
+  )
+
+mrngo_data_demography2 %>% 
+  count(age_group, sex) %>% 
+  tidyr::pivot_wider(
+    names_from   = sex, 
+    values_from  = n, 
+    values_fill  = 0
+  )
+
+
+```
+
+
+
+## Visualizations
+
+### Response FREQ
+
+```{r}
+
+# 1) For each ID–concept, count the number of distinct features
+id_concept_counts <- mrngo_data_cleaned %>% 
+  distinct(ID, concept, feature) %>% 
+  count(ID, concept, name = "n_features")
+
+# 2) Now for each concept, compute descriptives across all IDs
+concept_descriptives <- id_concept_counts %>% 
+  group_by(ID) %>% 
+  summarise(
+    n_concepts        = n(),                # how many participants named that concept
+    mean_feats   = mean(n_features),   # average features per participant
+    median_feats = median(n_features),
+    sd_feats     = sd(n_features),
+    min_feats    = min(n_features),
+    max_feats    = max(n_features)
+  ) %>% 
+  arrange(desc(mean_feats))
+
+print(concept_descriptives)
+
+
+```
+
+
+```{r}
+plot_freq = mrngo_data_cleaned %>% 
+  # 1) dedupe feature-responses
+  # 2) count how many features per (ID, concept)
+  count(ID, concept, name = "n_features") %>% 
+  # 3) average those counts *within* each ID
+  group_by(ID) %>% 
+  summarise(avg_response_rate = mean(n_features)) %>% 
+  ungroup() %>% 
+  # 4) histogram of the per-ID averages
+  ggplot(aes(x = avg_response_rate)) +
+    geom_histogram(binwidth = 1, colour = "white", fill = "#ccb3ff" ) +
+    custom_theme +
+    labs(x= "Average features produced by participants") +
+    theme(
+        axis.title.y = element_blank()
+      ) 
+
+print(plot_freq)
+
+ggsave(
+  filename = "../figures/avg_response_histogram.png",
+  plot     = plot_freq,
+  width    = 10,
+  height   = 6,
+  units    = "in",
+  dpi      = 300
+)
+```
+
+```{r}
+mrngo_data_cleaned %>% 
+  distinct(ID, concept, feature) %>% 
+  count(ID, concept, name = "n_features") %>% 
+  group_by(ID) %>% 
+  summarise(avg_feats = mean(n_features)) %>% 
+  ungroup() %>% 
+  summarise(
+    n_IDs        = n(),
+    mean_of_means  = mean(avg_feats),
+    median_of_means= median(avg_feats),
+    sd_of_means    = sd(avg_feats),
+    min_of_means   = min(avg_feats),
+    max_of_means   = max(avg_feats)
+  ) %>% 
+  print()
+```
+
+
+### Feature FREQ
+
+```{r}
+
+feature_freq_plot = mrngo_data_cleaned %>% 
+  count(feature, name = "n_features") %>% 
+  arrange(desc(n_features)) %>%
+  head(10) %>% 
+  mutate(feature = fct_reorder(feature, n_features)) %>% 
+  mutate(feature = recode(feature, !!!translations)) %>% 
+  ggplot(aes(x = feature, y = n_features)) +
+    geom_col(colour = "white", fill = "#ccb3ff") +
+    coord_flip() +         # optional: flip for readability
+    custom_theme +
+    labs(x = NULL, y = NULL) + 
+    theme(
+      axis.text.y = element_text(hjust = 1)
+    )
+
+show(feature_freq_plot) 
+
+ggsave(
+  filename = "../figures/feature_frequency_count.png",
+  plot     = feature_freq_plot,
+  width    = 9,
+  height   = 6,
+  units    = "in",
+  dpi      = 300
+)
+
+```
+
+### CONCEPT DISTINCT
+
+```{r}
+
+mrngo_data_clened_metrics %>%
+  # keep only distinguishing features
+  filter(Disting == "D") %>%
+  # count how many distinct features per concept
+  distinct(concept, feature, .keep_all = TRUE) %>%
+  count(concept, name = "n_dist_feats") %>%
+  # take the top 10
+  arrange(desc(n_dist_feats)) %>%
+  slice_head(n = 10) %>%
+  # make sure bars are ordered descending
+  ggplot(aes(x = reorder(concept, n_dist_feats), y = n_dist_feats)) +
+    geom_col(colour = "white", fill = "#ccb3ff") +
+    custom_theme +
+    labs(
+      x = NULL,
+      y = NULL
+    ) +
+    # rotate x labels so they fit
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+richness_plot = mrngo_data_clened_metrics_richness %>% 
+  distinct(concept, S_hat) %>% 
+  arrange(desc(S_hat)) %>% 
+  slice_head(n = 10) %>% 
+  ggplot(aes(x = fct_reorder(concept, S_hat), y = S_hat)) +
+    geom_col(fill = "#ccb3ff", colour = "white") +
+    coord_flip() +
+    custom_theme +
+    labs(
+      title = NULL,
+      x     = NULL,
+      y     = NULL
+    )
+
+show(richness_plot)
+
+ggsave(
+  filename = "../figures/feature_richness_count.png",
+  plot     = richness_plot,
+  width    = 9,
+  height   = 6,
+  units    = "in",
+  dpi      = 300
+)
+
+```
+
+
+### CORRELATION between stimuli metrics and richness
+
+```{r}
+library(ggpubr)
+library(patchwork)  # for arranging multiple plots
+
+# prepare your data (as before)
+cmpl <- mrngo_data_clened_metrics_richness %>% 
+  select(concept, S_hat, word_frequency, aoa_any) %>% 
+  filter(!is.na(S_hat), !is.na(word_frequency), !is.na(aoa_any))
+
+# Plot 1: Richness vs. Word Frequency
+p1 <- cmpl %>%
+  filter(S_hat != max(S_hat, na.rm = TRUE)) %>% 
+  filter(S_hat != max(S_hat, na.rm = TRUE)) %>% 
+  ggplot(aes(x = word_frequency, y = S_hat)) +
+    geom_point(size = 2, alpha = 0.7) +
+    geom_smooth(method = "lm", se = TRUE, color = "steelblue") +
+    stat_cor(method = "pearson", label.x = Inf, label.y = Inf,
+             hjust = 1.1, vjust = 1.5, size = 7) +
+    labs(
+      x     = "Word Frequency",
+      y     = bquote("Semantic richness ("~hat(S)~")"),
+      title = NULL
+    ) +
+  custom_theme
+
+# Plot 2: Richness vs. Age-of‐Acquisition
+p2 <- cmpl %>% 
+  ggplot(aes(x = aoa_any, y = S_hat)) +
+  geom_point(size = 2, alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "coral") +
+  stat_cor(method = "pearson", label.x = Inf, label.y = Inf,
+           hjust = 1.1, vjust = 1.5, size = 7) +
+  labs(
+    x     = "Age of Acquisition (AoA)",
+    y     = NULL,
+    title = NULL
+  ) +
+  custom_theme
+
+# Combine side by side
+combined_plot <- p1 + p2 + 
+  plot_layout(ncol = 2) & 
+  theme(
+    plot.title   = NULL,
+    axis.text    = element_text(color = "gray30"),
+    axis.title   = element_text(face = "bold")
+  ) +
+  custom_theme
+
+# Print it (and you can ggsave at high‐res right after)
+print(combined_plot)
+print(p1)
+print(p2)
+
+ggsave(
+  filename = "../figures/correlation_freq.png",
+  plot     = p1,
+  width    = 9,
+  height   = 7,
+  units    = "in",
+  dpi      = 300
+)
+
+
+ggsave(
+  filename = "../figures/correlation_aoa.png",
+  plot     = p2,
+  width    = 9,
+  height   = 7,
+  units    = "in",
+  dpi      = 300
+)
+
+```
+### PERFORMANCE BY GENDER * AGE
+
+```{r}
+
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+
+# 1) compute avg features-per-concept by ID
+id_avg <- mrngo_data_cleaned %>% 
+  distinct(ID, concept, feature) %>%     # one row per ID–concept–feature
+  count(ID, concept, name = "n_feats") %>%  # how many features each ID gave for each concept
+  group_by(ID) %>% 
+  summarise(avg_feats = mean(n_feats, na.rm = TRUE)) %>% 
+  ungroup()
+
+# 2) pull out each ID’s age & sex (assumed unique per ID)
+demog <- mrngo_data_cleaned %>% 
+  select(ID, age, sex) %>% 
+  distinct(ID, .keep_all = TRUE)
+
+id_demo <- left_join(id_avg, demog, by = "ID")
+
+id_demo_clean <- id_demo %>%
+  mutate(
+    age_f = factor(age, levels = sort(unique(age)))
+  )
+
+# 3) BAR + error‐bars (mean ± SE)
+p3 <- ggplot(id_demo_clean, aes(x = age_f, y = avg_feats, fill = sex)) +
+  stat_summary(
+    fun = mean, geom = "col",
+    position = position_dodge(width = 0.8),
+    width = 0.6
+  ) +
+  stat_summary(
+    fun.data = mean_se, geom = "errorbar",
+    position = position_dodge(width = 0.8),
+    width = 0.2
+  ) +
+  scale_fill_manual(values = c(female = "#F17C5D", male = "#5DA8D3")) +
+  labs(
+    x    = "Age",
+    y    = "Avg. features per concept",
+    fill = "Sex",
+    title = NULL
+  ) +
+  custom_theme
+
+# draw whichever you like:
+print(p3)
+
+ggsave(
+  filename = "../figures/age_sex_difference.png",
+  plot     = p3,
+  width    = 10,
+  height   = 6,
+  units    = "in",
+  dpi      = 300
+)
+
+```
+
+
+## Analysis
+
+### Correlations
+
+```{r}
+
+cmpl <- mrngo_data_clened_metrics_richness %>%
+  select(concept, S_hat, word_frequency, aoa_any) %>%
+  filter(!is.na(S_hat), !is.na(word_frequency), !is.na(aoa_any))
+
+# 1) Richness vs. word_frequency
+wf_ct  <- cor.test(cmpl$S_hat, cmpl$word_frequency, 
+                   method = "pearson", 
+                   use    = "complete.obs")
+
+# 2) Richness vs. aoao_any
+aoa_ct <- cor.test(cmpl$S_hat, cmpl$aoa_any, 
+                   method = "pearson", 
+                   use    = "complete.obs")
+
+# Print your results
+wf_ct
+aoa_ct
+
+# If you just want the raw r‐values:
+data.frame(
+  cor_richness__wf  = wf_ct$estimate,
+  cor_richness__aoa = aoa_ct$estimate
+)
+
+```
+
+
+### ANOVA - feature count
+
+```{r}
+
+# 1) Fit the ANOVA model
+anova_mod <- aov(avg_feats ~ age * sex, data = id_demo)
+
+# 2) Get the ANOVA table
+anova_res <- summary(anova_mod)
+print(anova_res)
+
+
+```
+
+
+### WordAnalytics
+
+
+```{r}
+
+WordListsAnalytics()
+
+
+```
+
+
+
