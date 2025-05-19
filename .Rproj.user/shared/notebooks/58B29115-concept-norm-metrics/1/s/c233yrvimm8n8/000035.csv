@@ -1,8 +1,0 @@
-"0",""
-"0","mrngo_data_demography = mrngo_data_cleaned %>% "
-"0","  select(ID, sex, age) %>%  distinct()"
-"0",""
-"0","# 1) Total counts by sex"
-"0","mrngo_data_demography %>% "
-"0","  count(sex) %>% "
-"0","  rename(Count = n)"

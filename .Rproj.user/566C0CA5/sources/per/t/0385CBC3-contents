@@ -108,7 +108,7 @@ READING IN DATA AND CLEANING
 mrngo_data = read_excel("../processed/MRNGO_manual_vector_lemmas_summary.xlsx",
                  sheet = "aggregated_data")
 
-mrngo_data_cleaned = mrngo_wordlist %>% 
+mrngo_data_cleaned = mrngo_data %>% 
   mutate(sex=as.factor(sex)) %>% 
   mutate(grade=as.factor(grade)) %>% 
   mutate(category = recode(category, !!!category_map),
@@ -124,8 +124,6 @@ mrngo_data_cleaned = mrngo_wordlist %>%
   rename(feature = vector_lemma_C) %>% 
   mutate(feature = as.factor(feature)) %>% 
   distinct(ID, concept, feature, .keep_all = TRUE)
-
-  
   
 ```
 
@@ -189,7 +187,7 @@ concept_summary <- df_pf %>%
   )
 
 # ── 6) Stitch everything back together ───────────────────────────────────────────
-mrngo_data_clened_metrics <- df_pf %>%
+mrngo_data_cleaned_metrics <- df_pf %>%
   left_join(concept_summary, by = "concept")
 
 
@@ -227,14 +225,14 @@ richness2 <- richness %>%
   mutate(concept_en = as.factor(as.character(concept_en)))
 
 # 5) now merge with your metrics (which already use English names in `concept`)
-mrngo_data_clened_metrics_richness <- mrngo_data_clened_metrics %>%
+mrngo_data_cleaned_metrics_richness <- mrngo_data_cleaned_metrics %>%
   left_join(
     richness2 %>% select(concept_en, everything()), 
     by = c("concept" = "concept_en")
   )
 
 # check
-glimpse(mrngo_data_clened_metrics_richness)
+glimpse(mrngo_data_cleaned_metrics_richness)
 
 
 
@@ -253,12 +251,12 @@ concept_info <- read_excel("../processed/MRNGO_concepts.xlsx", sheet = 1) %>%
   mutate(item_en = factor(item_en))
   
 # 3) Left-join
-mrngo_data_clened_metrics_richness <- mrngo_data_clened_metrics_richness %>%
+mrngo_data_cleaned_metrics_richness <- mrngo_data_cleaned_metrics_richness %>%
   left_join(concept_info,
             by = c("concept" = "item_en"))
 
 # 4) Quick check
-glimpse(mrngo_data_clened_metrics_richness)
+glimpse(mrngo_data_cleaned_metrics_richness)
 
 
 ```
@@ -450,7 +448,7 @@ ggsave(
 
 ```{r}
 
-mrngo_data_clened_metrics %>%
+mrngo_data_cleaned_metrics %>%
   # keep only distinguishing features
   filter(Disting == "D") %>%
   # count how many distinct features per concept
@@ -472,19 +470,32 @@ mrngo_data_clened_metrics %>%
       axis.text.x = element_text(angle = 45, hjust = 1)
     )
 
-richness_plot = mrngo_data_clened_metrics_richness %>% 
+richness_plot = mrngo_data_cleaned_metrics_richness %>% 
   distinct(concept, S_hat) %>% 
   arrange(desc(S_hat)) %>% 
-  slice_head(n = 10) %>% 
-  ggplot(aes(x = fct_reorder(concept, S_hat), y = S_hat)) +
-    geom_col(fill = "#ccb3ff", colour = "white") +
+  slice(c(1:5, (n() - 4):n())) %>% 
+  mutate(
+    group   = rep(c("top", "bottom"), each = 5),
+    concept = fct_reorder(concept, S_hat)
+  ) %>% 
+  ggplot(aes(x = concept, y = S_hat, fill = group)) +
+    geom_col(colour = "white") +
+    geom_text(
+      aes(label = round(S_hat)),              # round to whole number
+      position = position_stack(vjust = 0.9),
+      color    = "white",
+      size     = 4                             # slightly bigger
+    ) +
+    scale_fill_manual(
+      values = c(
+        top    = "#9B7DDC",
+        bottom = "#ccb3ff"
+      )
+    ) +
     coord_flip() +
     custom_theme +
-    labs(
-      title = NULL,
-      x     = NULL,
-      y     = NULL
-    )
+    labs(title = NULL, x = NULL, y = NULL) +
+    theme(legend.position = "none")
 
 show(richness_plot)
 
@@ -522,7 +533,7 @@ p1 <- cmpl %>%
              hjust = 1.1, vjust = 1.5, size = 7) +
     labs(
       x     = "Word Frequency",
-      y     = bquote("Semantic richness ("~hat(S)~")"),
+      y     = NULL,
       title = NULL
     ) +
   custom_theme

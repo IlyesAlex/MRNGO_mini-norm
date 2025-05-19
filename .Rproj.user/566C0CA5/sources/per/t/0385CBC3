@@ -1,9 +1,9 @@
 {
     "id": "0385CBC3",
-    "path": "C:/_ALEX_/RESEARCH/MRNGO/A_conceptnorm/data/school-pilot/scripts/concept-norm-metrics.Rmd",
+    "path": "C:/_ALEX_/RESEARCH/MRNGO/A_conceptnorm/data/MRNGO_mini-norm/scripts/concept-norm-metrics.Rmd",
     "project_path": "scripts/concept-norm-metrics.Rmd",
     "type": "r_markdown",
-    "hash": "3238495585",
+    "hash": "2725149896",
     "contents": "",
     "dirty": false,
     "created": 1747596529129.0,
@@ -12,15 +12,15 @@
     "properties": {
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "441,15",
-        "scrollLine": "402"
+        "cursorPosition": "490,25",
+        "scrollLine": "482"
     },
     "folds": "",
-    "lastKnownWriteTime": 1747630076,
+    "lastKnownWriteTime": 1747668708,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1747630076764,
+    "last_content_update": 1747668708373,
     "read_only": false,
     "read_only_alternatives": []
 }
