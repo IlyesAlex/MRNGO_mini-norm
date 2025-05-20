@@ -5,6 +5,7 @@ output: html_document
 
 # This is the analysis page of the MRNGO mini-norm (for DUCOG 2025)
 
+## MISC
 Let's read in the packages
 
 ```{r}
@@ -34,9 +35,6 @@ custom_theme = theme(
       )
 
 ```
-
-## READ-IN DATA
-
 RENAMING HUNGARIAN TO ENGLISH
 
 ```{r}
@@ -102,13 +100,15 @@ translations = c(
 
 ```
 
+## READ-IN MRNGO DATA
+
 READING IN DATA AND CLEANING
 
 ```{r}
 mrngo_data = read_excel("../processed/MRNGO_manual_vector_lemmas_summary.xlsx",
                  sheet = "aggregated_data")
 
-mrngo_data_cleaned = mrngo_wordlist %>% 
+mrngo_data_cleaned = mrngo_data %>% 
   mutate(sex=as.factor(sex)) %>% 
   mutate(grade=as.factor(grade)) %>% 
   mutate(category = recode(category, !!!category_map),
@@ -129,7 +129,7 @@ mrngo_data_cleaned = mrngo_wordlist %>%
   
 ```
 
-## CALCULATE MCRAE THINGS
+### CALCULATE MCRAE THINGS
 
 ```{r}
 
@@ -204,7 +204,7 @@ mrngo_data_clened_metrics <- df_pf %>%
 
 ```
 
-## SEMANTIC RICHNESS
+### SEMANTIC RICHNESS
 
 ```{r}
 library(stringi)
@@ -240,7 +240,7 @@ glimpse(mrngo_data_clened_metrics_richness)
 
 ```
 
-## CONCEPT DATA
+### CONCEPT DATA
 
 ```{r}
 
@@ -248,20 +248,113 @@ glimpse(mrngo_data_clened_metrics_richness)
 # 1) Read your lookup sheet (first sheet by default; change sheet= if needed)
 concept_info <- read_excel("../processed/MRNGO_concepts.xlsx", sheet = 1) %>%
   # keep only the three columns you need
-  select(item_en, word_frequency, aoa_any) %>%
+  select(item_en, natural, word_frequency, aoa_any) %>%
   # make sure item_en is a character vector
   mutate(item_en = factor(item_en))
   
 # 3) Left-join
 mrngo_data_clened_metrics_richness <- mrngo_data_clened_metrics_richness %>%
   left_join(concept_info,
-            by = c("concept" = "item_en"))
+            by = c("concept" = "item_en"))  %>% 
+  select(-Concept) %>% 
+  rename(Concept=concept) %>% 
+  rename(Feature=feature) 
 
 # 4) Quick check
 glimpse(mrngo_data_clened_metrics_richness)
 
 
 ```
+
+
+## READ-IN MCRAE DATA
+```{r}
+mcrae_data = read_excel("../others/McRae-norm_filtered.xlsx",
+                 sheet = "features")
+mcrae_data_cleaned = mcrae_data %>% 
+  mutate(Concept=as.factor(Concept)) %>% 
+  mutate(Feature=as.factor(Feature)) %>% 
+  mutate(WB_Label=as.factor(WB_Label)) %>% 
+  mutate(WB_Maj=as.factor(WB_Maj)) %>%
+  mutate(WB_Min=as.factor(WB_Min)) %>% 
+  mutate(Disting=as.factor(Disting)) %>% 
+  mutate(`Disting_Feats_%_No_Tax`=as.numeric(`Disting_Feats_%_No_Tax`)) %>% 
+  mutate(Density_No_Tax=as.numeric(Density_No_Tax))
+  
+
+
+
+```
+## READ-IN KREMER_IT
+```{r}
+kremer_it_data = read_excel("../others/Kremer_norm_filtered-IT.xlsx",
+                 sheet = "frequency")
+cols_to_convert <- c("Nationality", "Concept(EN)", "ConceptClass", "Concept(IT)", "Feature", "RelationType", "(Non)Distinguishing")
+
+kremer_it_data_cleaned = kremer_it_data %>% 
+  mutate(across(all_of(cols_to_convert), as.factor))
+
+kremer_de_data = read_excel("../others/Kremer_norm_filtered-DE.xlsx",
+                 sheet = "frequency")
+cols_to_convert <- c("Nationality", "Concept(EN)", "ConceptClass", "Concept(IT)", "Feature", "RelationType", "(Non)Distinguishing")
+
+kremer_de_data_cleaned = kremer_de_data %>% 
+  mutate(across(all_of(cols_to_convert), as.factor))
+```
+
+## READ-IN VINSON
+```{r}
+vinson_data_features = read_excel("../others/Vinson-norm_filtered.xlsx",
+                 sheet = "features")
+vinson_data_richness = read_excel("../others/Vinson-norm_filtered.xlsx",
+                 sheet = "richness")
+
+vinson_merged_data <- merge(vinson_data_features, vinson_data_richness, by = "Concept", all = TRUE) %>% 
+  mutate(Concept=as.factor(Concept)) %>% 
+  mutate(Feature=as.factor(Feature))
+```
+
+
+## MERGE DATASETS
+
+```{r}
+library(fuzzyjoin)
+
+# Perform fuzzy join to find common concepts
+mcrae_concepts = mcrae_data_cleaned %>% select(Concept)
+
+mcrae_data_cleaned_filtered = mcrae_data_cleaned %>% 
+  mutate(Dataset = "MCRAE")
+
+# Add dataset origin
+mrngo_data_clened_metrics_richness_filtered <- mrngo_data_clened_metrics_richness %>%
+  semi_join(mcrae_concepts, by = "Concept") %>%
+  mutate(Dataset = "MRNGO")
+
+# Stack datasets
+mrngo_mcrae_merged <- bind_rows(mcrae_data_cleaned_filtered, mrngo_data_clened_metrics_richness_filtered)
+
+# Reorder columns to place 'Dataset' first
+mrngo_mcrae_merged <- mrngo_mcrae_merged %>% select(Dataset, everything())
+  
+```
+
+```{r}
+kremer_data_it = kremer_it_data_cleaned %>% 
+  mutate(Dataset = "KREMER_IT")
+
+kremer_data_de = kremer_de_data_cleaned %>% 
+  mutate(Dataset = "KREMER_DE")
+
+mrngo_data_clened_metrics_richness_filtered <- mrngo_data_clened_metrics_richness %>%
+  semi_join(kremer_data_de, kremer_data_it, by = c("Concept", "Concept(EN)")) %>%
+  mutate(Dataset = "MRNGO")
+
+mrngo_kremer_merged <- bind_rows(kremer_data_de,kremer_data_it, mrngo_data_clened_metrics_richness_filtered)
+
+mrngo_kremer_merged <- mrngo_kremer_merged %>% select(Dataset, everything())
+```
+
 
 
 ## Demography
@@ -333,8 +426,6 @@ mrngo_data_demography2 %>%
 
 ```
 
-
-
 ## Visualizations
 
 ### Response FREQ
@@ -363,7 +454,6 @@ print(concept_descriptives)
 
 
 ```
-
 
 ```{r}
 plot_freq = mrngo_data_cleaned %>% 
@@ -412,7 +502,6 @@ mrngo_data_cleaned %>%
   ) %>% 
   print()
 ```
-
 
 ### Feature FREQ
 
@@ -499,7 +588,6 @@ ggsave(
 
 ```
 
-
 ### CORRELATION between stimuli metrics and richness
 
 ```{r}
@@ -576,7 +664,8 @@ ggsave(
 )
 
 ```
-### PERFORMANCE BY GENDER * AGE
+
+### PERFORMANCE BY GENDER \* AGE
 
 ```{r}
 
@@ -639,8 +728,50 @@ ggsave(
 
 ```
 
-
 ## Analysis
+
+
+### H1
+mutate-tel a WB-s oszlopokat faktorrá kell alakítani,
+ifelse változóval olyan oszlop, amiben a WB_Maj alapján kategorizálom hogy fankcionális-e vagy sem (0 ha nem, 1 ha igen)
+summarise-olni kell a dataset-et úgy, hogy számolja meg azonosítónként (ID), hogy hány fuknciónális label van (count legyen a név mondjuk)
+```{r}
+mrngo_cleaned_h1 = mrngo_data_cleaned %>% 
+  select(c("ID", "age", "sex", "feature", "category", "concept", "WB_label", "WB_Maj", "WB_Min")) %>% 
+  mutate(above_seven = ifelse(age>7, 1, 0))
+
+```
+
+```{r}
+t.test(count_h1, above_seven, data=mrngo_cleaned_h1)
+```
+
+### H2
+utánanézni, hogy hogyan lehet egy "or" logikai tesztet csinálni az ifelse parancsban (WB_Maj == "c" vagy "e")
+summarise-olni kell a dataset-et úgy, hogy számolja meg dataset-enként és conceptenként, hogy hány 1 label van (count legyen a név mondjuk)
+```{r}
+mrngo_cleaned_h2 = mrngo_mcrae_merged %>% 
+  select(Dataset, Concept, WB_Maj) %>% 
+  mutate() 
+```
+```{r}
+t.test(count_h2, is_ce, data=mrngo_cleaned_h2)
+```
+### H3
+
+```{r}
+mrngo_cleaned_h3 = mrngo_data_clened_metrics_richness %>% 
+  select(Concept, natural, S_hat) %>% 
+  distinct()
+
+t.test(S_hat ~ natural, data=mrngo_cleaned_h3)
+```
+
+
+### H4
+```{r}
+mrngo_data_h4 = 
+```
 
 ### Correlations
 
@@ -672,7 +803,6 @@ data.frame(
 
 ```
 
-
 ### ANOVA - feature count
 
 ```{r}
@@ -687,9 +817,7 @@ print(anova_res)
 
 ```
 
-
 ### WordAnalytics
-
 
 ```{r}
 
@@ -697,6 +825,3 @@ WordListsAnalytics()
 
 
 ```
-
-
-
