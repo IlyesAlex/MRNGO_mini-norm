@@ -6,6 +6,7 @@ output: html_document
 # This is the analysis page of the MRNGO mini-norm (for DUCOG 2025)
 
 ## MISC
+
 Let's read in the packages
 
 ```{r}
@@ -35,6 +36,7 @@ custom_theme = theme(
       )
 
 ```
+
 RENAMING HUNGARIAN TO ENGLISH
 
 ```{r}
@@ -266,8 +268,8 @@ glimpse(mrngo_data_clened_metrics_richness)
 
 ```
 
-
 ## READ-IN MCRAE DATA
+
 ```{r}
 mcrae_data = read_excel("../others/McRae-norm_filtered.xlsx",
                  sheet = "features")
@@ -285,7 +287,9 @@ mcrae_data_cleaned = mcrae_data %>%
 
 
 ```
+
 ## READ-IN KREMER_IT
+
 ```{r}
 kremer_it_data = read_excel("../others/Kremer_norm_filtered-IT.xlsx",
                  sheet = "frequency")
@@ -302,7 +306,22 @@ kremer_de_data_cleaned = kremer_de_data %>%
   mutate(across(all_of(cols_to_convert), as.factor))
 ```
 
+## READ-IN KREMER_MERGED
+
+```{r}
+kremer_merged_data = read_excel("../others/Kremer_norm_filtered-merged.xlsx",
+                 sheet = "Kremer_norm_filtered-merged")
+kremer_merged_cleaned = kremer_merged_data %>%
+  mutate(Concept=as.factor(Concept)) %>% 
+  mutate(Feature=as.factor(Feature)) %>% 
+  mutate(ConceptClass=as.factor(ConceptClass)) %>% 
+  mutate(`Concept(IT)`=as.factor(`Concept(IT)`)) %>%
+  mutate(S_hat=as.numeric(S_hat)) %>% 
+  mutate(sd_S_hat=as.numeric(sd_S_hat))
+```
+
 ## READ-IN VINSON
+
 ```{r}
 vinson_data_features = read_excel("../others/Vinson-norm_filtered.xlsx",
                  sheet = "features")
@@ -313,7 +332,6 @@ vinson_merged_data <- merge(vinson_data_features, vinson_data_richness, by = "Co
   mutate(Concept=as.factor(Concept)) %>% 
   mutate(Feature=as.factor(Feature))
 ```
-
 
 ## MERGE DATASETS
 
@@ -340,22 +358,22 @@ mrngo_mcrae_merged <- mrngo_mcrae_merged %>% select(Dataset, everything())
 ```
 
 ```{r}
-kremer_data_it = kremer_it_data_cleaned %>% 
-  mutate(Dataset = "KREMER_IT")
-
-kremer_data_de = kremer_de_data_cleaned %>% 
-  mutate(Dataset = "KREMER_DE")
+kremer_merged_richness = kremer_merged_cleaned %>% 
+  mutate(Dataset = "KREMER") %>% 
+  select(Concept, natural, S_hat, Nationality, Dataset) %>% 
+  distinct()
 
 mrngo_data_clened_metrics_richness_filtered <- mrngo_data_clened_metrics_richness %>%
-  semi_join(kremer_data_de, kremer_data_it, by = c("Concept", "Concept(EN)")) %>%
-  mutate(Dataset = "MRNGO")
+  mutate(Nationality="HUN")  %>% 
+  mutate(Dataset = "MRNGO") %>% 
+  select(Concept, natural, S_hat, Nationality, Dataset) %>% 
+  distinct() %>% 
+  filter(Concept %in%  kremer_merged_richness$Concept)
 
-mrngo_kremer_merged <- bind_rows(kremer_data_de,kremer_data_it, mrngo_data_clened_metrics_richness_filtered)
+mrngo_kremer_merged <- bind_rows(kremer_merged_richness, mrngo_data_clened_metrics_richness_filtered)
 
 mrngo_kremer_merged <- mrngo_kremer_merged %>% select(Dataset, everything())
 ```
-
-
 
 ## Demography
 
@@ -730,11 +748,10 @@ ggsave(
 
 ## Analysis
 
-
 ### H1
-mutate-tel a WB-s oszlopokat faktorrá kell alakítani,
-ifelse változóval olyan oszlop, amiben a WB_Maj alapján kategorizálom hogy fankcionális-e vagy sem (0 ha nem, 1 ha igen)
-summarise-olni kell a dataset-et úgy, hogy számolja meg azonosítónként (ID), hogy hány fuknciónális label van (count legyen a név mondjuk)
+
+mutate-tel a WB-s oszlopokat faktorrá kell alakítani, ifelse változóval olyan oszlop, amiben a WB_Maj alapján kategorizálom hogy fankcionális-e vagy sem (0 ha nem, 1 ha igen) summarise-olni kell a dataset-et úgy, asja meg, hogy azonosítónként hány százalékban van funkcionális label hogy hány fuknciónális label van (percent legyen a név mondjuk)
+
 ```{r}
 mrngo_cleaned_h1 = mrngo_data_cleaned %>% 
   select(c("ID", "age", "sex", "feature", "category", "concept", "WB_label", "WB_Maj", "WB_Min")) %>% 
@@ -743,20 +760,23 @@ mrngo_cleaned_h1 = mrngo_data_cleaned %>%
 ```
 
 ```{r}
-t.test(count_h1, above_seven, data=mrngo_cleaned_h1)
+t.test(percent_h1, above_seven, data=mrngo_cleaned_h1)
 ```
 
 ### H2
-utánanézni, hogy hogyan lehet egy "or" logikai tesztet csinálni az ifelse parancsban (WB_Maj == "c" vagy "e")
-summarise-olni kell a dataset-et úgy, hogy számolja meg dataset-enként és conceptenként, hogy hány 1 label van (count legyen a név mondjuk)
+
+utánanézni, hogy hogyan lehet egy "or" logikai tesztet csinálni az ifelse parancsban (WB_Maj == "c" vagy "e") summarise-olni kell a dataset-et úgy, hogy számolja meg dataset-enként és conceptenként, hogy százalékban van 1-es label (percent legyen a név mondjuk)
+
 ```{r}
 mrngo_cleaned_h2 = mrngo_mcrae_merged %>% 
   select(Dataset, Concept, WB_Maj) %>% 
   mutate() 
 ```
+
 ```{r}
 t.test(count_h2, is_ce, data=mrngo_cleaned_h2)
 ```
+
 ### H3
 
 ```{r}
@@ -767,10 +787,15 @@ mrngo_cleaned_h3 = mrngo_data_clened_metrics_richness %>%
 t.test(S_hat ~ natural, data=mrngo_cleaned_h3)
 ```
 
-
 ### H4
+német diáko
 ```{r}
-mrngo_data_h4 = 
+mrngo_data_h4 = mrngo_kremer_merged %>% 
+  select(Concept, natural, S_hat, Nationality, Dataset) %>% 
+  distinct() %>% 
+  filter(natural==1)
+
+t.test(S_hat ~ Dataset, data=mrngo_data_h4)
 ```
 
 ### Correlations
