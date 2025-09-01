@@ -4,9 +4,9 @@ import numpy as np
 from itertools import combinations
 from openpyxl import load_workbook
 
-
+#%%
 # Set the file paths; update input_file if needed
-input_file = '../processed/MRNGO_manual_vector_lemmas_summary_ORIG.xlsx'  # Path to your input Excel file
+input_file = '../processed/MRNGO_manual_vector_lemmas_summary.xlsx'  # Path to your input Excel file
 output_file = '../processed/MRNGO_manual_vector_lemmas_summary.xlsx'  # Path for the output Excel file
 
 output_vector = '../processed/MRNGO_mini-norm_vectorspace.xlsx'
@@ -21,14 +21,33 @@ def strip_accents(s: str) -> str:
                    .decode('ascii')
     )
 
+input_file_mcrae = '../others/McRae-norm_filtered.xlsx'  # Path to your input Excel file
+mcrae_filtered = pd.read_excel(input_file_mcrae)
+mcrae_filtered_notax = mcrae_filtered[mcrae_filtered['WB_Maj'] != 'c']
 
+mcrae_filtered_notax_matrix = mcrae_filtered_notax.pivot_table(
+    index="Concept",
+    columns="Feature",
+    values="Prod_Freq",
+    fill_value=0
+)
+
+concepts_to_keep = mcrae_filtered_notax["Concept"].unique()
 #%% Read the raw data from the 'nyers' sheet
-df = pd.read_excel(input_file, sheet_name='nyers')
-filtered_matrix = pd.read_excel("../processed/MRNGO_mini-norm_vectorspace.xlsx", sheet_name="mcrae_vector_matrix")
+df = pd.read_excel(input_file, sheet_name='aggregated_data')
+filtered_matrix = pd.read_excel("../processed/MRNGO_mini-norm_vectorspace.xlsx", sheet_name="mcrae_notax_vector_matrix")
+
+df_unique = df.drop_duplicates(subset=['ID', 'concept', 'vector_lemma_C'])
+df_unique['ID_Count'] = (df_unique.groupby(['vector_lemma_C', 'concept'])['ID'].transform('nunique'))
+df_unique_filtered_ID = df_unique[df_unique['ID_Count'] >= 2]
+df_unique_filtered_ID['Concept_Count'] = df_unique_filtered_ID['vector_lemma_C'].map((df_unique.groupby('vector_lemma_C')['concept'].nunique()))
+df_unique_filtered = df_unique_filtered_ID[df_unique_filtered_ID['Concept_Count'] >= 3]
+df_unique_filtered_notax = df_unique_filtered[df_unique_filtered['WB_Maj'] != 'c']
+df_unique_filtered_notax_restricted = df_unique_filtered_notax[df_unique_filtered_notax["concept_EN"].isin(concepts_to_keep)]
 
 #%% 1) Aggregate via category
 df_cat = (
-    df
+    df_unique
     .groupby(['category', 'concept', 'vector_lemma_C'])
     .size()
     .reset_index(name='frequency')
@@ -36,7 +55,7 @@ df_cat = (
 
 # 3) Aggregate via ID
 df_id = (
-    df
+    df_unique
     .groupby(['ID', 'category', 'vector_lemma_C'])
     .size()
     .reset_index(name='frequency')
@@ -44,7 +63,7 @@ df_id = (
 
 # 3) Aggregate via vector
 df_freq = (
-    df
+    df_unique
     .groupby(['vector_lemma_C'])
     .size()
     .reset_index(name='frequency')
@@ -76,66 +95,52 @@ print(f'Kész! A feldolgozott adatot a "{output_file}" és a "{output_csv}" fáj
 
 #%% Vector space
 
-# 2) count each (concept, lemma) pair
-df_counts = (
-    df
-    .groupby(['concept', 'vector_lemma_C'])
-    .size()
-    .reset_index(name='frequency')
+def build_matrix(df_src):
+    counts = (
+        df_src.groupby(['concept', 'vector_lemma_C'], as_index=False)
+              .size()
+              .rename(columns={'size': 'frequency'})
+    )
+    return (
+        counts.pivot(index='concept', columns='vector_lemma_C', values='frequency')
+              .fillna(0).astype(int).reset_index()
+    )
+
+# 1) All features (from df_unique)
+full_matrix = build_matrix(df_unique)
+
+# 2) Filtered by ID-support (from df_unique_filtered_ID)
+filtered_matrix = build_matrix(df_unique_filtered_ID)
+
+# 3) McRae (from df_unique_filtered)
+filtered_matrix_mcrae = build_matrix(df_unique_filtered)
+
+# 4) McRae No-Tax (WB_Maj != "c" within df_unique_filtered)
+filtered_matrix_mcrae_notax = build_matrix(
+    df_unique_filtered[df_unique_filtered['WB_Maj'] != 'c']
 )
 
-# 3) pivot to get the full concept×lemma matrix
-full_matrix = (
-    df_counts
-    .pivot(index='concept',
-           columns='vector_lemma_C',
-           values='frequency')
-    .fillna(0)
-    .astype(int)
-    .reset_index()
-)
+filtered_matrix_notax_restricted = build_matrix(df_unique_filtered_notax_restricted)
 
-# 4) find which lemmas occur only once in total
-lemma_totals = df_counts.groupby('vector_lemma_C')['frequency'].sum()
-keep_lemmas = lemma_totals[lemma_totals > 1].index
-
-# 5) build a filtered matrix (drop any lemma-col with total freq == 1)
-filtered_matrix = full_matrix.loc[
-    :, ['concept'] + [c for c in full_matrix.columns if c in keep_lemmas]
-]
-
-# count in how many unique concepts each lemma appears
-lemma_concept_counts = df_counts.groupby('vector_lemma_C')['concept'] \
-                                 .nunique()
-
-# keep only those lemmas that appear in 3 or more concepts
-keep_lemmas_mcrae = lemma_concept_counts[lemma_concept_counts >= 3].index
-
-# 5) build a filtered matrix (drop any lemma-col with total freq == 1)
-filtered_matrix_mcrae = full_matrix.loc[
-    :, ['concept'] + [c for c in full_matrix.columns if c in keep_lemmas_mcrae]
-]
-
-# 6) write both sheets into one Excel file
+#%%
+# --- Write sheets --------------------------------------------------------------
 with pd.ExcelWriter(output_vector, engine='openpyxl') as writer:
-    full_matrix.to_excel(writer,
-                         sheet_name='concept_vector_matrix',
-                         index=False)
-    filtered_matrix.to_excel(writer,
-                              sheet_name='filtered_vector_matrix',
-                              index=False)
-    filtered_matrix_mcrae.to_excel(writer,
-                              sheet_name='mcrae_vector_matrix',
-                              index=False)
+    full_matrix.to_excel(writer, sheet_name='concept_vector_matrix', index=False)
+    filtered_matrix.to_excel(writer, sheet_name='filtered_vector_matrix', index=False)
+    filtered_matrix_mcrae.to_excel(writer, sheet_name='mcrae_vector_matrix', index=False)
+    filtered_matrix_mcrae_notax.to_excel(writer, sheet_name='mcrae_notax_vector_matrix', index=False)
+    filtered_matrix_notax_restricted.to_excel(writer, sheet_name='mcrae_notax_filtered_vector_matrix', index=False)
 
-print("✅ Done. 2 sheets written to processed_data.xlsx:")
-print("   • concept_vector_matrix  (all features)")
-print("   • filtered_features      (drops lemmas with total freq=1)")
+print("✅ Done. 4 sheets written:")
+print("   • concept_vector_matrix")
+print("   • filtered_vector_matrix")
+print("   • mcrae_vector_matrix")
+print("   • mcrae_notax_vector_matrix")
 
 #%% 3) MCRAE indices
 # Correlation
 # 1) set 'concept' as the index
-df_matrix = filtered_matrix.set_index('concept')
+df_matrix = filtered_matrix_notax_restricted.set_index('concept')
 
 # 2) drop any non-numeric columns (in case one slipped in)
 numeric_matrix = df_matrix.select_dtypes(include=[int, float])
@@ -145,7 +150,7 @@ corr = numeric_matrix.corr()
 r2   = corr.pow(2)
 
 # 4) collect all feature-pairs with shared variance ≥ 10%
-min_shared_variance = 0.1
+min_shared_variance = 0.065
 records = []
 feats = corr.columns.tolist()
 for i in range(len(feats)):
@@ -156,6 +161,13 @@ for i in range(len(feats)):
                 'Feature2': feats[j],
                 'r':        corr.iat[i, j],
                 'r2':       r2.iat[i, j]
+            })
+        else:
+            records.append({
+                'Feature1': feats[i],
+                'Feature2': feats[j],
+                'r':        corr.iat[i, j],
+                'r2':       0.0
             })
 
 high_corr = pd.DataFrame(records).sort_values('r2', ascending=False)
@@ -239,35 +251,55 @@ def enrich_all_features(df_raw: pd.DataFrame,
 
     # 14) use high_corr to compute per-concept Num_Corred_Pairs & Density
     records = []
-    # make sure high_corr uses same column names
-    hc = high_corr.rename(columns={'Feature1':'Feature1','Feature2':'Feature2'})
+
+    # Ensure expected columns and keep only what's needed
+    hc = high_corr.rename(columns={'Feature1': 'Feature1', 'Feature2': 'Feature2', 'r2': 'r2'})[
+        ['Feature1', 'Feature2', 'r2']
+    ].copy()
+
+    # Compute total possible feature pairs in the DATASET (based on all features present in hc)
+    all_feats = pd.Index(pd.unique(pd.concat([hc['Feature1'], hc['Feature2']])))
+    total_pairs_dataset = int(len(all_feats) * (len(all_feats) - 1) / 2)
+
     for concept, sub in df.groupby('Concept'):
         feats = set(sub['Feature'])
         m = len(feats)
-        # count how many high_corr pairs fall inside this concept's feature set
-        mask1 = hc['Feature1'].isin(feats)
-        mask2 = hc['Feature2'].isin(feats)
-        num_pairs = int((hc[mask1 & mask2].shape[0]))
-        density = 0.0 if m < 2 else num_pairs / (m*(m-1)/2)
-        records.append((concept, num_pairs, density))
+
+        # all pairs in hc that lie entirely within this concept's feature set
+        mask_in_concept = hc['Feature1'].isin(feats) & hc['Feature2'].isin(feats)
+        subpairs = hc[mask_in_concept]
+
+        # non-zero shared variance pairs
+        nz = subpairs[subpairs['r2'] > 0.0]
+
+        # Num_Corred_Pairs_No_Tax: count of nz pairs
+        num_pairs_no_tax = int(nz.shape[0])
+
+        # Density (redefined): sum of r2 * 100 over non-zero pairs
+        density_shared_var_pct = float((nz['r2'] * 100.0).sum())
+
+        # %_Corred_Pairs_No_Tax: relative to ALL possible pairs in the dataset
+        pct_corred_pairs_no_tax = 0.0 if total_pairs_dataset == 0 else num_pairs_no_tax / total_pairs_dataset
+
+        records.append(
+            (concept, num_pairs_no_tax, pct_corred_pairs_no_tax, density_shared_var_pct)
+        )
 
     corr_df = pd.DataFrame.from_records(
         records,
-        columns=['Concept','Num_Corred_Pairs','Density']
+        columns=['Concept', 'Num_Corred_Pairs_No_Tax', '%_Corred_Pairs_No_Tax', 'Density']
     ).set_index('Concept')
 
     # final merge
-    df_final = df.merge(corr_df,
-                        left_on='Concept',
-                        right_index=True)
+    df_final = df.merge(corr_df, left_on='Concept', right_index=True)
 
     return df_final
 
 # ————————————— example usage —————————————
 
-df_out = enrich_all_features(df, high_corr)
+df_out = enrich_all_features(df_unique_filtered_notax_restricted, high_corr)
 
-
+#%%
 with pd.ExcelWriter(
     "../processed/MRNGO_manual_vector_lemmas_summary.xlsx",
     engine="openpyxl",

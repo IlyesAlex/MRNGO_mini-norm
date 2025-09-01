@@ -123,81 +123,108 @@ mrngo_data_cleaned = mrngo_data %>%
   ) %>% 
   rename(feature = vector_lemma_C) %>% 
   mutate(feature = as.factor(feature)) %>% 
-  distinct(ID, concept, feature, .keep_all = TRUE)
+  distinct(ID, concept, feature, .keep_all = TRUE) %>% 
+  mutate(
+    ID = factor(ID),
+    WB_label = factor(WB_label),
+    WB_Maj = factor(WB_Maj),
+    WB_Min = factor(WB_Min)
+  )
   
 ```
 
-## CALCULATE MCRAE THINGS
+## CALCULATE MCRAE MEASURES
 
 ```{r}
 
 library(dplyr)
 library(stringr)
 
-# ── 0) First tally up your “production frequencies”  ────────────────────────────
+# ── 0) First tally up your “production frequencies” (all data; TAX view) ───────
 df_counts <- mrngo_data_cleaned %>%
   count(concept, feature, name = "Prod_Freq")
 
+# Parallel counts for the No_Tax view (exclude WB_Maj == "c")
+df_counts_no_tax <- mrngo_data_cleaned %>%
+  filter(WB_Maj != "c") %>%
+  count(concept, feature, name = "Prod_Freq_No_Tax")
 
-# ── 1) Feature‐level summaries ──────────────────────────────────────────────────
-feature_stats <- df_counts %>%
+# ── 1) Feature‐level summaries (TAX and No_Tax) ────────────────────────────────
+feature_stats_tax <- df_counts %>%
   group_by(feature) %>%
   summarise(
-    Sum_PF_No_Tax = sum(Prod_Freq),       # total uses of that feature
-    CPF            = n_distinct(concept)  # number of concepts in which it occurs
+    Sum_PF_Tax = sum(Prod_Freq),          # total uses of that feature (all data)
+    CPF_Tax    = n_distinct(concept)      # in how many concepts it occurs
   ) %>%
   mutate(
-    Disting  = if_else(CPF <= 2, "D", "ND"),
-    Distinct = 1 / CPF                    # inverse of number of concepts
+    Disting_Tax  = if_else(CPF_Tax <= 2, "D", "ND"),
+    Distinct_Tax = 1 / CPF_Tax
   )
 
-
-# ── 2) Bring those back to the concept×feature table & compute CV ─────────────
-df_pf <- df_counts %>%
-  left_join(feature_stats, by = "feature") %>%
+feature_stats_no_tax <- df_counts_no_tax %>%
+  group_by(feature) %>%
+  summarise(
+    Sum_PF_No_Tax = sum(Prod_Freq_No_Tax),   # total uses excluding WB_Maj == "c"
+    CPF_No_Tax    = n_distinct(concept)
+  ) %>%
   mutate(
-    CV_No_Tax = Prod_Freq / Sum_PF_No_Tax
+    Disting_No_Tax  = if_else(CPF_No_Tax <= 2, "D", "ND"),
+    Distinct_No_Tax = 1 / CPF_No_Tax
   )
 
+# ── 2) Bring those back to the concept×feature table & compute CVs ─────────────
+# Start from TAX counts, then join both TAX and No_Tax feature-level stats
+df_pf <- df_counts %>%
+  left_join(feature_stats_tax,   by = "feature") %>%
+  left_join(feature_stats_no_tax, by = "feature") %>%
+  mutate(
+    # Your request: CV_No_Tax uses Prod_Freq over Sum_PF_No_Tax (filtered sum)
+    CV_No_Tax = Prod_Freq / Sum_PF_No_Tax,
+    # (Optional) also keep a TAX baseline, if useful
+    CV_Tax    = Prod_Freq / Sum_PF_Tax
+  )
 
-# ── 3) Within‐concept rankings & some string‐lengths ────────────────────────────
+# ── 3) Within‐concept rankings & some string‐lengths ───────────────────────────
 df_pf <- df_pf %>%
   group_by(concept) %>%
   arrange(desc(Prod_Freq)) %>%
-  mutate(
-    Rank_PF = row_number()
-  ) %>%
+  mutate(Rank_PF = row_number()) %>%
   ungroup() %>%
   mutate(
     Feat_Length_Including_Spaces = str_length(feature),
-    Length_Letters             = str_length(str_remove_all(concept, "[^A-Za-z]")),
-    Length_Syllables           = str_count(concept, "[AEIOUYaeiouy]+"),
-    Length_Phonemes            = NA_integer_  # ← you’ll need a phoneme counter/dictionary
+    Length_Letters               = str_length(str_remove_all(concept, "[^A-Za-z]")),
+    Length_Syllables             = str_count(concept, "[AEIOUYaeiouy]+"),
+    Length_Phonemes              = NA_integer_  # placeholder for future phoneme counter
   )
 
-
-# ── 4) Concept‐level aggregates ──────────────────────────────────────────────────
-concept_summary <- df_pf %>%
+# ── 4) Concept‐level aggregates (TAX view = your originals) ────────────────────
+concept_summary_tax <- df_pf %>%
   group_by(concept) %>%
   summarise(
     Num_Feats_Tax         = n(),
-    Num_Disting_Feats_Tax = sum(Disting == "D"),
+    Num_Disting_Feats_Tax = sum(Disting_Tax == "D"),
     Disting_Feats._Tax    = Num_Disting_Feats_Tax / Num_Feats_Tax,
-    Mean_Distinct_Tax     = mean(Distinct)
+    Mean_Distinct_Tax     = mean(Distinct_Tax)
   )
 
-# ── 6) Stitch everything back together ───────────────────────────────────────────
+# ── 5) Concept‐level aggregates (No_Tax view; exclude WB_Maj == "c") ───────────
+# Build a concept×feature table on the filtered data, then attach No_Tax feature stats
+df_pf_no_tax <- df_counts_no_tax %>%
+  left_join(feature_stats_no_tax, by = "feature")
+
+concept_summary_no_tax <- df_pf_no_tax %>%
+  group_by(concept) %>%
+  summarise(
+    Num_Feats_No_Tax         = n(),
+    Num_Disting_Feats_No_Tax = sum(Disting_No_Tax == "D"),
+    Disting_Feats._No_Tax    = Num_Disting_Feats_No_Tax / Num_Feats_No_Tax,
+    Mean_Distinct_No_Tax     = mean(Distinct_No_Tax)
+  )
+
+# ── 6) Stitch everything back together ─────────────────────────────────────────
 mrngo_data_cleaned_metrics <- df_pf %>%
-  left_join(concept_summary, by = "concept")
-
-
-# df_final now has one row per (concept, feature) with these new columns:
-#   Rank_PF,  Sum_PF_No_Tax, CPF, Disting, Distinct,
-#   CV_No_Tax, Feat_Length_Including_Spaces,
-#   Length_Letters, Length_Phonemes, Length_Syllables,
-#   Num_Feats_Tax, Num_Disting_Feats_Tax, Disting_Feats._Tax,
-#   Mean_Distinct_Tax, Num_Corred_Pairs_No_Tax,
-#   %_Corred_Pairs_Tax, Density_Tax
+  left_join(concept_summary_tax,    by = "concept") %>%
+  left_join(concept_summary_no_tax, by = "concept")
 
 
 ```
