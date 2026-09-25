@@ -86,7 +86,7 @@ df_emb = pd.DataFrame(emb,
 
 clusterer = hdbscan.HDBSCAN(min_cluster_size=3)
 # bring in the cluster & category & concept labels
-df_emb['cluster']  = DBSCAN(eps=0.5, min_samples=2).fit_predict(df_emb[["UMAP1","UMAP2"]])
+df_emb['cluster']  = DBSCAN(eps=0.5, min_samples=3).fit_predict(df_emb[["UMAP1","UMAP2"]])
 df_emb['cluster_hdb'] = clusterer.fit_predict(df_emb[["UMAP1","UMAP2"]])
 df_emb['category'] = cats
 df_emb['concept']  = df_emb.index
@@ -142,7 +142,7 @@ plt.tight_layout(pad=0)
 plt.show()
 
 # save high-res for poster use
-fig.savefig("../figures/umap_concept_space.png", dpi=300)
+fig.savefig("../figures/umap_concept_space_en.png", dpi=300)
 plt.show()
 
 #%% OPTIMIZER
